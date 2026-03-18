@@ -1,0 +1,11 @@
+{
+  "text": "Happy",
+  "mode": "combined",
+  "letterHeight": 5,
+  "characterHeight": 30,
+  "spacing": 1.5,
+  "addPlate": true,
+  "plateThickness": 2,
+  "platePadding": 4,
+  "fontName": "Roboto-Bold"
+}

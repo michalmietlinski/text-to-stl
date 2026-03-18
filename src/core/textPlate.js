@@ -1,0 +1,883 @@
+/**
+ * Text rectangle generator (core).
+ * Rectangle plate with raised text, Arial Bold style (opentype) or built-in vector font.
+ * Text is scaled to fit the rectangle; plate thickness and letter height are parametrized.
+ */
+
+import path from "node:path";
+import modeling from "@jscad/modeling";
+import { serialize } from "@jscad/stl-serializer";
+import earcut from "earcut";
+
+const { primitives, booleans, transforms, text: textModule, geometries, extrusions } = modeling;
+const { cuboid } = primitives;
+const { union } = booleans;
+const { translate } = transforms;
+const { geom2, geom3 } = geometries;
+const { extrudeLinear } = extrusions;
+
+const DEFAULT_RESOLUTION = 16; // Samples per Bézier segment; higher = smoother font curves (circles, arcs).
+
+function toFiniteNumber(value, label) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) throw new Error(`${label} must be a finite number.`);
+  return num;
+}
+
+function fnv1a32(str) {
+  // Deterministic sync hash for deduping STLs.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+/**
+ * Flatten opentype path commands to contours (array of [x,y] points per contour).
+ * Handles M, L, C, Q, Z. resolution = samples per Bézier segment (higher = smoother curves).
+ */
+function flattenPath(path, resolution = DEFAULT_RESOLUTION) {
+  const samples = Math.max(2, Math.min(128, Math.round(resolution)));
+  const contours = [];
+  let current = [];
+  let last = [0, 0];
+
+  const add = (x, y) => {
+    current.push([x, y]);
+    last = [x, y];
+  };
+
+  const sampleCubic = (x0, y0, x1, y1, x2, y2, x3, y3) => {
+    for (let i = 1; i <= samples; i++) {
+      const t = i / samples;
+      const u = 1 - t;
+      const u2 = u * u, u3 = u2 * u;
+      const t2 = t * t, t3 = t2 * t;
+      const x = u3 * x0 + 3 * u2 * t * x1 + 3 * u * t2 * x2 + t3 * x3;
+      const y = u3 * y0 + 3 * u2 * t * y1 + 3 * u * t2 * y2 + t3 * y3;
+      add(x, y);
+    }
+  };
+
+  const sampleQuad = (x0, y0, x1, y1, x2, y2) => {
+    for (let i = 1; i <= samples; i++) {
+      const t = i / samples;
+      const u = 1 - t;
+      const x = u * u * x0 + 2 * u * t * x1 + t * t * x2;
+      const y = u * u * y0 + 2 * u * t * y1 + t * t * y2;
+      add(x, y);
+    }
+  };
+
+  const commands = path.commands || path;
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i];
+    const type = cmd.type || cmd;
+    if (type === "M" || type === "m") {
+      if (current.length > 0) contours.push(current);
+      const x = cmd.x ?? cmd.x1;
+      const y = cmd.y ?? cmd.y1;
+      current = [[x, y]];
+      last = [x, y];
+    } else if (type === "L" || type === "l") {
+      const x = cmd.x ?? last[0] + (cmd.dx ?? 0);
+      const y = cmd.y ?? last[1] + (cmd.dy ?? 0);
+      add(x, y);
+    } else if (type === "C" || type === "c") {
+      const x0 = last[0], y0 = last[1];
+      const x1 = cmd.x1 ?? x0 + (cmd.dx1 ?? 0);
+      const y1 = cmd.y1 ?? y0 + (cmd.dy1 ?? 0);
+      const x2 = cmd.x2 ?? x0 + (cmd.dx2 ?? 0);
+      const y2 = cmd.y2 ?? y0 + (cmd.dy2 ?? 0);
+      const x3 = cmd.x ?? x0 + (cmd.dx ?? 0);
+      const y3 = cmd.y ?? y0 + (cmd.dy ?? 0);
+      sampleCubic(x0, y0, x1, y1, x2, y2, x3, y3);
+    } else if (type === "Q" || type === "q") {
+      const x0 = last[0], y0 = last[1];
+      const x1 = cmd.x1 ?? x0 + (cmd.dx1 ?? 0);
+      const y1 = cmd.y1 ?? y0 + (cmd.dy1 ?? 0);
+      const x2 = cmd.x ?? x0 + (cmd.dx ?? 0);
+      const y2 = cmd.y ?? y0 + (cmd.dy ?? 0);
+      sampleQuad(x0, y0, x1, y1, x2, y2);
+    } else if (type === "Z" || type === "z") {
+      if (current.length > 1) current.push([current[0][0], current[0][1]]);
+      contours.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) contours.push(current);
+  return contours;
+}
+
+/**
+ * Signed area of a closed contour (positive = counter-clockwise).
+ * JSCAD extrusion expects CCW winding for correct outward normals.
+ */
+function signedArea(contour) {
+  if (!contour || contour.length < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < contour.length; i++) {
+    const j = (i + 1) % contour.length;
+    a += contour[i][0] * contour[j][1];
+    a -= contour[j][0] * contour[i][1];
+  }
+  return a / 2;
+}
+
+/**
+ * Ensure contour is counter-clockwise (positive area). Reverse in place if not.
+ */
+function ensureCounterClockwise(contour) {
+  if (signedArea(contour) < 0) contour.reverse();
+}
+
+/**
+ * Centroid of a closed contour (for point-in-polygon grouping).
+ */
+function contourCentroid(contour) {
+  if (!contour || contour.length < 2) return [0, 0];
+  let cx = 0, cy = 0, n = 0;
+  const len = contour[0][0] === contour[contour.length - 1][0] && contour[0][1] === contour[contour.length - 1][1]
+    ? contour.length - 1
+    : contour.length;
+  for (let i = 0; i < len; i++) {
+    cx += contour[i][0];
+    cy += contour[i][1];
+    n++;
+  }
+  return n ? [cx / n, cy / n] : [0, 0];
+}
+
+/**
+ * Point-in-polygon (ray casting). Point [x,y], contour as array of [x,y].
+ */
+function pointInPolygon(point, contour) {
+  const [px, py] = point;
+  let inside = false;
+  const n = contour.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = contour[i];
+    const [xj, yj] = contour[j];
+    if (yi > py !== yj > py && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Ensure contour is closed (first point duplicated at end). Returns new array.
+ */
+function ensureClosed(contour) {
+  if (!contour || contour.length < 2) return contour ? [...contour] : [];
+  const out = [...contour];
+  const first = out[0];
+  const last = out[out.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) out.push([first[0], first[1]]);
+  return out;
+}
+
+/**
+ * Remove duplicate closing point for earcut (earcut expects open ring).
+ */
+function ringPoints(contour) {
+  if (!contour || contour.length < 3) return contour ? [...contour] : [];
+  const c = [...contour];
+  if (c[0][0] === c[c.length - 1][0] && c[0][1] === c[c.length - 1][1]) c.pop();
+  return c.length >= 3 ? c : contour;
+}
+
+/**
+ * Triangulate one outer contour and its holes with earcut. Returns array of triangles (each = 3 points [x,y]).
+ */
+function triangulateShape(outerContour, holeContours) {
+  const outer = ringPoints(outerContour);
+  if (outer.length < 3) return [];
+  const vertices = outer.map((p) => [p[0], p[1]]);
+  const holeIndices = [];
+  for (const h of holeContours) {
+    const ring = ringPoints(h);
+    if (ring.length < 3) continue;
+    holeIndices.push(vertices.length);
+    for (const p of ring) vertices.push([p[0], p[1]]);
+  }
+  const data = vertices.flat();
+  const indices = earcut(data, holeIndices.length ? holeIndices : undefined, 2);
+  if (!indices || indices.length < 3) return [];
+  const triangles = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = vertices[indices[i]];
+    const b = vertices[indices[i + 1]];
+    const c = vertices[indices[i + 2]];
+    const tri = [a, b, c];
+    if (signedArea(tri) < 0) tri.reverse();
+    triangles.push(tri);
+  }
+  return triangles;
+}
+
+/**
+ * Get bounding box of contours [[[x,y],...], ...].
+ */
+function contoursBounds(contours) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const contour of contours) {
+    for (const [x, y] of contour) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Scale and translate contours to fit inside rectWidth x rectHeight, centered. Padding from edges.
+ */
+function fitContours(contours, rectWidth, rectHeight, padding = 0) {
+  const { minX, minY, width, height } = contoursBounds(contours);
+  const innerW = Math.max(0.1, rectWidth - 2 * padding);
+  const innerH = Math.max(0.1, rectHeight - 2 * padding);
+  const scale = Math.min(innerW / width, innerH / height) || 1;
+  const offsetX = rectWidth / 2 - (minX + width / 2) * scale;
+  const offsetY = rectHeight / 2 - (minY + height / 2) * scale;
+
+  return contours.map((contour) =>
+    contour.map(([x, y]) => [x * scale + offsetX, y * scale + offsetY])
+  );
+}
+
+/**
+ * Load font: from URL (string) or path (Node). Returns opentype Font or null.
+ * When URL fetch fails (e.g. Node without network), tries local fallback paths.
+ */
+export async function loadFont(source) {
+  if (!source) return null;
+  const { parse } = await import("opentype.js");
+  const parseBuf = (buf) => parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+
+  try {
+    if (typeof fetch !== "undefined") {
+      const res = await fetch(source);
+      if (res && res.ok) {
+        const buf = await res.arrayBuffer();
+        return parse(buf);
+      }
+    }
+  } catch (_) {}
+
+  const fs = await import("node:fs/promises").catch(() => null);
+  if (fs) {
+    try {
+      const buf = await fs.readFile(source);
+      return parseBuf(buf);
+    } catch (_) {}
+    // When source is a URL that failed, try local fallbacks (e.g. examples/OpenSans-Bold.ttf)
+    if (typeof source === "string" && (source.startsWith("http://") || source.startsWith("https://"))) {
+      const name = (source.split("/").pop() || "font.ttf").split("?")[0];
+      for (const dir of ["examples", "fonts", "."]) {
+        try {
+          const buf = await fs.readFile(path.join(dir, name));
+          return parseBuf(buf);
+        } catch (_) {}
+      }
+    }
+  }
+  return null;
+}
+
+/** Horizontal offset for text block: left = padding, center = centered, right = rectWidth - padding. */
+function offsetXForAlign(align, rectWidth, padding, boundsMinX, boundsWidth, scale) {
+  const a = (align || "left").toLowerCase();
+  if (a === "right") return rectWidth - padding - (boundsMinX + boundsWidth) * scale;
+  if (a === "center") return rectWidth / 2 - (boundsMinX + boundsWidth / 2) * scale;
+  return padding - boundsMinX * scale;
+}
+
+/**
+ * Get text contours using opentype font. Scaled to fit rect; horizontal alignment via opts.textAlign (left|center|right).
+ * Supports line breaks (\n or \r\n): each line is laid out with a vertical offset, then the block is scaled to fit.
+ * Per-line alignment: each line is aligned independently based on its own width.
+ * Returns { glyphContours, bounds } where glyphContours = [ [contour, contour, ...], ... ] per line.
+ */
+export function getTextContoursFromFont(font, text, rectWidth, rectHeight, letterHeightMm, padding = 1, opts = {}) {
+  if (!text || !font) return { glyphContours: [], bounds: { width: 0, height: 0 } };
+  const textAlign = (opts.textAlign || "left").toLowerCase();
+  const fontSize = 100;
+  const lineHeight = fontSize * 1.2;
+  const lines = String(text).split(/\r?\n/);
+  // Use one path per line (getPath) so all contours for all characters are in one path.
+  // That way outer+hole pairs (O, P, R, e, etc.) stay together; getPaths() can return one path per
+  // contour in some fonts, which would make hole contours separate "glyphs" and get extruded as solid.
+  const pathsPerLine = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const baselineY = -(lines.length - 1 - i) * lineHeight;
+    const path = font.getPath(line, 0, baselineY, fontSize);
+    pathsPerLine.push(path);
+  }
+  const resolution = Math.max(2, Math.min(128, Math.round(opts.resolution ?? opts.bezierSamples ?? DEFAULT_RESOLUTION)));
+  let glyphRaw = pathsPerLine.map((path) => flattenPath(path, resolution));
+  if (opts.debug) console.warn(`[debug getTextContours] lines=${lines.length} contoursPerLine=[${glyphRaw.map((c) => c.length).join(",")}]`);
+  const allRaw = glyphRaw.flat();
+  const bounds = contoursBounds(allRaw);
+  if (bounds.width < 1e-6 || bounds.height < 1e-6) return { glyphContours: [], bounds };
+  
+  // Calculate scale based on entire text block to ensure all lines use the same font size
+  const scale = Math.min(
+    Math.max(0.1, rectWidth - 2 * padding) / bounds.width,
+    Math.max(0.1, rectHeight - 2 * padding) / bounds.height
+  ) || 1;
+  
+  // Vertical centering is based on the entire block
+  const offsetY = rectHeight / 2 - (bounds.minY + bounds.height / 2) * scale;
+  
+  // Apply transformation with per-line horizontal alignment
+  const glyphContours = glyphRaw.map((lineContours) => {
+    if (lineContours.length === 0) return [];
+    
+    // Calculate bounds for this specific line
+    const lineBounds = contoursBounds(lineContours);
+    
+    // Calculate horizontal offset for this line based on its own width
+    const lineOffsetX = offsetXForAlign(textAlign, rectWidth, padding, lineBounds.minX, lineBounds.width, scale);
+    
+    // Transform contours for this line with its specific horizontal offset
+    return lineContours.map((c) =>
+      c.map(([x, y]) => {
+        const px = x * scale + lineOffsetX;
+        const py = y * scale + offsetY;
+        return [px, rectHeight - py];
+      })
+    );
+  });
+  
+  return { glyphContours, bounds };
+}
+
+/**
+ * Get text segments using JSCAD vectorText (built-in font). Returns array of segments (each segment = [[x,y],...]).
+ * Supports line breaks (\n or \r\n). Scaled to fit rect; horizontal alignment via textAlign (left|center|right).
+ */
+export function getTextSegmentsVector(textStr, rectWidth, rectHeight, padding = 1, textAlign = "left") {
+  if (!textStr) return [];
+  const align = (textAlign || "left").toLowerCase();
+  const height = 21;
+  const lineHeight = height * 1.3;
+  const lines = String(textStr).split(/\r?\n/);
+  const allSegments = [];
+  for (let i = 0; i < lines.length; i++) {
+    const segments = textModule.vectorText({ height, align: "center" }, lines[i]);
+    const offsetY = -(lines.length - 1 - i) * lineHeight;
+    for (const seg of segments) {
+      allSegments.push(seg.map(([x, y]) => [x, y + offsetY]));
+    }
+  }
+  if (allSegments.length === 0) return [];
+  const allPoints = allSegments.flat();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of allPoints) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  const width = maxX - minX || 1;
+  const height2 = maxY - minY || 1;
+  const innerW = Math.max(0.1, rectWidth - 2 * padding);
+  const innerH = Math.max(0.1, rectHeight - 2 * padding);
+  const scale = Math.min(innerW / width, innerH / height2) || 1;
+  const offsetX = offsetXForAlign(align, rectWidth, padding, minX, width, scale);
+  const offsetY = rectHeight / 2 - (minY + height2 / 2) * scale;
+
+  return allSegments.map((seg) =>
+    seg.map(([x, y]) => [x * scale + offsetX, y * scale + offsetY])
+  );
+}
+
+/**
+ * Generate STL: rectangle plate + extruded text.
+ * Build optional plant stake: bar extending in -Y from plate bottom (orientation to text).
+ * Local: width stakeWidth (X), thickness (Z), length stakeHeight (Y). Top at y=0; far end is a triangle tip (single point).
+ * Returns geom3 in local coords (stake top at y=0, centered in X, z in [0, thickness]).
+ */
+function createStake(stakeWidth, thickness, stakeHeight) {
+  const w = stakeWidth / 2;
+  const t = thickness;
+  const H = stakeHeight;
+  const tip = [0, -H, t / 2]; // single point at center of end face
+
+  const v = {
+    tfl: [-w, 0, 0],
+    tfr: [w, 0, 0],
+    tbr: [w, 0, t],
+    tbl: [-w, 0, t],
+    bfl: [-w, -H, 0],
+    bfr: [w, -H, 0],
+    bbr: [w, -H, t],
+    bbl: [-w, -H, t],
+  };
+
+  const polygons = [
+    [v.tfl, v.tfr, v.tbr, v.tbl], // top (y=0)
+    [v.tfl, v.tfr, v.bfr, v.bfl], // front (z=0)
+    [v.tbr, v.tbl, v.bbl, v.bbr], // back (z=t)
+    [v.tbl, v.tfl, v.bfl, v.bbl], // left (x=-w)
+    [v.tfr, v.tbr, v.bbr, v.bfr], // right (x=w)
+    [v.bfl, v.bfr, tip], // bottom: 4 triangles meeting at tip
+    [v.bfr, v.bbr, tip],
+    [v.bbr, v.bbl, tip],
+    [v.bbl, v.bfl, tip],
+  ];
+  return geom3.fromPoints(polygons);
+}
+
+/**
+ * @param {object} params - { rectangleWidth, rectangleHeight, thickness, letterHeight, text, textAlign?, resolution?, fontPath?, fontUrl?, padding?, addStake?, stakeWidth?, stakeHeight? }
+ */
+export async function generate(params, options = {}) {
+  const name = options.name || "text_plate";
+  const rectangleWidth = toFiniteNumber(params.rectangleWidth ?? 80, "rectangleWidth");
+  const rectangleHeight = toFiniteNumber(params.rectangleHeight ?? 40, "rectangleHeight");
+  const thickness = toFiniteNumber(params.thickness ?? 2, "thickness");
+  const letterHeight = toFiniteNumber(params.letterHeight ?? 2, "letterHeight");
+  const text = params.text != null ? String(params.text) : "HELLO";
+  const padding = toFiniteNumber(params.padding ?? 2, "padding");
+  const resolution = params.resolution != null ? Math.max(2, Math.min(128, Math.round(Number(params.resolution)))) : DEFAULT_RESOLUTION;
+  const textAlign = ["left", "center", "right"].includes(String(params.textAlign || "left").toLowerCase())
+    ? String(params.textAlign).toLowerCase()
+    : "left";
+  const fontPath = params.fontPath ?? null;
+  const fontUrl = params.fontUrl ?? params.fontPath ?? null;
+  const addStake = params.addStake === true;
+  const stakeWidth = addStake ? toFiniteNumber(params.stakeWidth ?? 8, "stakeWidth") : 0;
+  const stakeHeight = addStake ? toFiniteNumber(params.stakeHeight ?? 60, "stakeHeight") : 0;
+
+  if (rectangleWidth <= 0 || rectangleHeight <= 0 || thickness <= 0 || letterHeight <= 0) {
+    throw new Error("rectangleWidth, rectangleHeight, thickness, letterHeight must be > 0.");
+  }
+  if (addStake && (stakeWidth <= 0 || stakeHeight <= 0)) {
+    throw new Error("When addStake is true, stakeWidth and stakeHeight must be > 0.");
+  }
+
+  const plate = translate(
+    [rectangleWidth / 2, rectangleHeight / 2, thickness / 2],
+    cuboid({ size: [rectangleWidth, rectangleHeight, thickness] })
+  );
+
+  let glyphContours = [];
+  let font = await loadFont(fontUrl);
+  if (!font && fontPath) font = await loadFont(fontPath);
+  if (options.debug) console.error(`[debug] font loaded: ${!!font} (tried url then path)`);
+  if (font) {
+    const out = getTextContoursFromFont(font, text, rectangleWidth, rectangleHeight, letterHeight, padding, { ...options, textAlign, resolution });
+    glyphContours = out.glyphContours || [];
+  }
+  if (glyphContours.length === 0) {
+    const segments = getTextSegmentsVector(text, rectangleWidth, rectangleHeight, padding, textAlign);
+    if (segments.length > 0) glyphContours = segments.map((s) => [s]);
+    if (options.debug) console.error(`[debug] using vector fallback: ${segments.length} segments`);
+    if (fontPath || fontUrl) {
+      console.error("Warning: Font did not load. You will only see a simple shape (e.g. one circle). Put a TTF file in the same folder as your JSON (e.g. examples/OpenSans-Bold.ttf), set \"fontPath\": \"OpenSans-Bold.ttf\", and run again. See examples/README-font.md.");
+    }
+  }
+
+  const geometries = [plate];
+  const debug = options.debug === true;
+
+  if (debug) {
+    console.error(`[debug] glyphContours.length=${glyphContours.length} text="${text}"`);
+  }
+
+  // Per-glyph: classify outers vs holes by containment (works with mixed case where winding may differ)
+  for (let gi = 0; gi < glyphContours.length; gi++) {
+    const glyph = glyphContours[gi];
+    const closed = glyph
+      .filter((c) => c.length >= 3)
+      .map((c) => ensureClosed(c))
+      .filter((c) => Math.abs(signedArea(c)) > 1e-6);
+    if (closed.length === 0) continue;
+
+    // Sort contours by area (descending) - larger contours are checked first for containment
+    const sorted = closed
+      .map((c, i) => ({ contour: c, area: Math.abs(signedArea(c)), index: i }))
+      .sort((a, b) => b.area - a.area);
+
+    // Classify each contour: if its centroid is inside a larger contour, it's a hole of that contour
+    const outers = [];
+    const holes = [];
+    const contourParent = new Array(sorted.length).fill(-1); // -1 = outer, >= 0 = index of parent outer
+
+    for (let i = 0; i < sorted.length; i++) {
+      const cen = contourCentroid(sorted[i].contour);
+      let parentIdx = -1;
+      // Check if this contour is inside any larger contour
+      for (let j = 0; j < i; j++) {
+        // Only check larger contours that are outers (not themselves holes)
+        if (contourParent[j] !== -1) continue;
+        if (pointInPolygon(cen, sorted[j].contour)) {
+          parentIdx = j;
+          break; // Found immediate parent (first/largest containing contour)
+        }
+      }
+      contourParent[i] = parentIdx;
+      if (parentIdx === -1) {
+        outers.push({ contour: sorted[i].contour, index: outers.length, sortedIndex: i });
+      } else {
+        holes.push(sorted[i].contour);
+      }
+    }
+
+    // Assign each hole to its containing outer
+    const holesByOuter = outers.map(() => []);
+    for (let i = 0; i < sorted.length; i++) {
+      if (contourParent[i] === -1) continue; // This is an outer, not a hole
+      // Find which outer index corresponds to the parent
+      const parentSortedIdx = contourParent[i];
+      const outerIdx = outers.findIndex((o) => o.sortedIndex === parentSortedIdx);
+      if (outerIdx >= 0) {
+        holesByOuter[outerIdx].push(sorted[i].contour);
+      }
+    }
+
+    if (debug) {
+      console.error(`[debug] glyph ${gi}: contours=${closed.length} outers=${outers.length} holes=${holes.length} holesByOuter=[${holesByOuter.map((h) => h.length).join(",")}]`);
+    }
+
+    // Triangulate each outer + its holes (earcut), then extrude each triangle — no geom2 subtract
+    for (let k = 0; k < outers.length; k++) {
+      const contour = outers[k].contour;
+      ensureCounterClockwise(contour);
+      const outerSign = Math.sign(signedArea(contour));
+      const holes = holesByOuter[k].map((h) => {
+        const hole = [...h].map((p) => [p[0], p[1]]);
+        if (Math.sign(signedArea(hole)) === outerSign) hole.reverse();
+        return hole;
+      });
+      const triangles = triangulateShape(contour, holes);
+      for (const tri of triangles) {
+        const g2 = geom2.fromPoints(tri);
+        const extruded = extrudeLinear({ height: letterHeight }, g2);
+        const raised = translate([0, 0, thickness], extruded);
+        geometries.push(raised);
+      }
+    }
+  }
+
+  let geometry = geometries.length === 1 ? plate : union(plate, ...geometries.slice(1));
+  if (addStake) {
+    const stake = translate(
+      [rectangleWidth / 2, 0, 0],
+      createStake(stakeWidth, thickness, stakeHeight)
+    );
+    geometry = union(geometry, stake);
+  }
+  const rawData = serialize({ binary: false }, geometry);
+  const stl =
+    typeof rawData === "string"
+      ? rawData
+      : Array.isArray(rawData) && rawData.length > 0 && typeof rawData[0] === "string"
+        ? rawData[0]
+        : Buffer.from(rawData).toString("utf8");
+
+  return {
+    stl,
+    meta: {
+      rectangleWidth,
+      rectangleHeight,
+      thickness,
+      letterHeight,
+      text,
+      name,
+      textAlign,
+      resolution,
+      addStake: addStake || undefined,
+      stakeWidth: addStake ? stakeWidth : undefined,
+      stakeHeight: addStake ? stakeHeight : undefined,
+    },
+  };
+}
+
+/**
+ * Get letter contours from font at specified character height (mm).
+ * Returns array of letters, each with contours at actual size.
+ */
+export function getLetterContours(font, text, characterHeightMm, resolution = DEFAULT_RESOLUTION) {
+  if (!font || !text) return [];
+  
+  const letters = [];
+  const unitsPerEm = font.unitsPerEm || 1000;
+  const scale = characterHeightMm / unitsPerEm;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === ' ' || char === '\n' || char === '\r') continue;
+    
+    const glyph = font.charToGlyph(char);
+    if (!glyph || !glyph.path) continue;
+    
+    const path = glyph.getPath(0, 0, unitsPerEm);
+    const contours = flattenPath(path, resolution);
+    
+    if (contours.length === 0) continue;
+    
+    // Scale to mm and flip Y (font Y goes up, we need to flip for STL)
+    const scaledContours = contours.map(c => 
+      c.map(([x, y]) => [x * scale, -y * scale])
+    );
+    
+    const bounds = contoursBounds(scaledContours);
+    const advanceWidth = (glyph.advanceWidth || 0) * scale;
+    
+    letters.push({
+      char,
+      contours: scaledContours,
+      bounds,
+      advanceWidth
+    });
+  }
+  
+  return letters;
+}
+
+/**
+ * Extrude letter contours into 3D geometry.
+ * Uses earcut triangulation to handle holes (O, P, R, etc.)
+ */
+function extrudeLetterContours(contours, letterHeight, debug = false) {
+  const geometries = [];
+  
+  // Classify contours as outers vs holes
+  const closed = contours
+    .filter(c => c.length >= 3)
+    .map(c => ensureClosed(c))
+    .filter(c => Math.abs(signedArea(c)) > 1e-6);
+  
+  if (closed.length === 0) return null;
+  
+  const sorted = closed
+    .map((c, i) => ({ contour: c, area: Math.abs(signedArea(c)), index: i }))
+    .sort((a, b) => b.area - a.area);
+  
+  const outers = [];
+  const contourParent = new Array(sorted.length).fill(-1);
+  
+  for (let i = 0; i < sorted.length; i++) {
+    const cen = contourCentroid(sorted[i].contour);
+    let parentIdx = -1;
+    
+    for (let j = 0; j < i; j++) {
+      if (contourParent[j] !== -1) continue;
+      if (pointInPolygon(cen, sorted[j].contour)) {
+        parentIdx = j;
+        break;
+      }
+    }
+    
+    contourParent[i] = parentIdx;
+    if (parentIdx === -1) {
+      outers.push({ contour: sorted[i].contour, index: outers.length, sortedIndex: i });
+    }
+  }
+  
+  const holesByOuter = outers.map(() => []);
+  for (let i = 0; i < sorted.length; i++) {
+    if (contourParent[i] === -1) continue;
+    const parentSortedIdx = contourParent[i];
+    const outerIdx = outers.findIndex(o => o.sortedIndex === parentSortedIdx);
+    if (outerIdx >= 0) {
+      holesByOuter[outerIdx].push(sorted[i].contour);
+    }
+  }
+  
+  // Triangulate and extrude
+  for (let k = 0; k < outers.length; k++) {
+    const contour = outers[k].contour;
+    ensureCounterClockwise(contour);
+    const outerSign = Math.sign(signedArea(contour));
+    const holes = holesByOuter[k].map(h => {
+      const hole = [...h];
+      if (Math.sign(signedArea(hole)) === outerSign) hole.reverse();
+      return hole;
+    });
+    
+    const triangles = triangulateShape(contour, holes);
+    for (const tri of triangles) {
+      const g2 = geom2.fromPoints(tri);
+      const extruded = extrudeLinear({ height: letterHeight }, g2);
+      geometries.push(extruded);
+    }
+  }
+  
+  return geometries.length > 0 ? (geometries.length === 1 ? geometries[0] : union(...geometries)) : null;
+}
+
+/**
+ * Generate Font-to-STL: individual letters or combined text with optional base plate.
+ * Base plate automatically sizes to fit the text.
+ * 
+ * @param {object} params - {
+ *   text: string,
+ *   mode: "separate" | "combined",
+ *   letterHeight: number (mm, extrusion height),
+ *   characterHeight: number (mm, height of characters),
+ *   spacing: number (mm, between letters in combined mode),
+ *   fontPath?: string,
+ *   fontUrl?: string,
+ *   addPlate?: boolean,
+ *   plateThickness?: number (mm),
+ *   platePadding?: number (mm),
+ *   resolution?: number
+ * }
+ */
+export async function generateFontToSTL(params, options = {}) {
+  const text = params.text != null ? String(params.text) : "HELLO";
+  const mode = (params.mode || "combined").toLowerCase();
+  const letterHeight = toFiniteNumber(params.letterHeight ?? 5, "letterHeight");
+  const characterHeight = toFiniteNumber(params.characterHeight ?? 20, "characterHeight");
+  const spacing = toFiniteNumber(params.spacing ?? 0, "spacing");
+  const addPlate = params.addPlate === true;
+  const plateThickness = addPlate ? toFiniteNumber(params.plateThickness ?? 2, "plateThickness") : 0;
+  const platePadding = addPlate ? toFiniteNumber(params.platePadding ?? 2, "platePadding") : 0;
+  const resolution = params.resolution != null ? Math.max(2, Math.min(128, Math.round(Number(params.resolution)))) : DEFAULT_RESOLUTION;
+  
+  if (letterHeight <= 0 || characterHeight <= 0) {
+    throw new Error("letterHeight and characterHeight must be > 0");
+  }
+  
+  // Load font
+  let font = await loadFont(params.fontUrl || params.fontPath);
+  if (!font) {
+    throw new Error("Font is required. Provide fontUrl or fontPath.");
+  }
+  
+  // Get letter contours
+  const letters = getLetterContours(font, text, characterHeight, resolution);
+  
+  if (letters.length === 0) {
+    throw new Error("No valid letters found in text");
+  }
+  
+  if (options.debug) {
+    console.error(`[debug] mode=${mode} letters=${letters.length} text="${text}"`);
+  }
+  
+  // Mode: separate - return array of { char, stl }
+  if (mode === "separate") {
+    const results = [];
+    // Deduplicate: if the same glyph (case-insensitive) renders to the same STL,
+    // only keep one copy. This avoids multiple downloads when text repeats letters.
+    const seen = new Set();
+    
+    for (const letter of letters) {
+      const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
+      if (!geom) continue;
+      
+      let finalGeom = geom;
+      
+      // Add optional plate behind letter
+      if (addPlate) {
+        const plateWidth = letter.bounds.width + 2 * platePadding;
+        const plateHeight = letter.bounds.height + 2 * platePadding;
+        const plate = translate(
+          [letter.bounds.minX + letter.bounds.width / 2, letter.bounds.minY + letter.bounds.height / 2, plateThickness / 2],
+          cuboid({ size: [plateWidth, plateHeight, plateThickness] })
+        );
+        const raised = translate([0, 0, plateThickness], geom);
+        finalGeom = union(plate, raised);
+      }
+      
+      const rawData = serialize({ binary: false }, finalGeom);
+      const stl = typeof rawData === "string" ? rawData :
+        Array.isArray(rawData) && rawData.length > 0 && typeof rawData[0] === "string" ? rawData[0] :
+        Buffer.from(rawData).toString("utf8");
+      
+      const charKey = String(letter.char).toLowerCase();
+      const dedupKey = `${charKey}|${fnv1a32(stl)}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      results.push({ char: letter.char, stl });
+    }
+    
+    return { mode: "separate", letters: results };
+  }
+  
+  // Mode: combined - arrange letters horizontally with shared baseline
+  // Font glyphs already have baseline at y=0, just need to position horizontally
+  const geometries = [];
+  let xOffset = 0;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  
+  for (const letter of letters) {
+    const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
+    if (!geom) continue;
+    
+    // Position letter horizontally only - baseline is already at y=0
+    // Just shift left edge to xOffset
+    const translated = translate([xOffset - letter.bounds.minX, 0, 0], geom);
+    geometries.push(translated);
+    
+    // Track bounds for plate
+    const letterMinX = xOffset;
+    const letterMaxX = xOffset + letter.bounds.width;
+    const letterMinY = letter.bounds.minY; // Ascenders (negative, going up)
+    const letterMaxY = letter.bounds.maxY; // Descenders (positive, going down) or baseline (0)
+    
+    if (letterMinX < minX) minX = letterMinX;
+    if (letterMaxX > maxX) maxX = letterMaxX;
+    if (letterMinY < minY) minY = letterMinY;
+    if (letterMaxY > maxY) maxY = letterMaxY;
+    
+    xOffset += letter.advanceWidth + spacing;
+  }
+  
+  if (geometries.length === 0) {
+    throw new Error("No geometry generated from text");
+  }
+  
+  let finalGeom = geometries.length === 1 ? geometries[0] : union(...geometries);
+  
+  // Shift everything so minimum Y is at 0 (baseline alignment with descenders below becoming positive)
+  const shiftUp = -minY;
+  if (Math.abs(shiftUp) > 0.001) {
+    finalGeom = translate([0, shiftUp, 0], finalGeom);
+    // Update bounds after shift
+    maxY = maxY + shiftUp;
+    minY = 0;
+  }
+  
+  // Add optional plate
+  if (addPlate) {
+    const plateWidth = (maxX - minX) + 2 * platePadding;
+    const plateHeight = (maxY - minY) + 2 * platePadding;
+    const plateCenterX = (minX + maxX) / 2;
+    const plateCenterY = (minY + maxY) / 2;
+    
+    const plate = translate(
+      [plateCenterX, plateCenterY, plateThickness / 2],
+      cuboid({ size: [plateWidth, plateHeight, plateThickness] })
+    );
+    const raised = translate([0, 0, plateThickness], finalGeom);
+    finalGeom = union(plate, raised);
+  }
+  
+  const rawData = serialize({ binary: false }, finalGeom);
+  const stl = typeof rawData === "string" ? rawData :
+    Array.isArray(rawData) && rawData.length > 0 && typeof rawData[0] === "string" ? rawData[0] :
+    Buffer.from(rawData).toString("utf8");
+  
+  return {
+    mode: "combined",
+    stl,
+    meta: {
+      text,
+      letterHeight,
+      characterHeight,
+      spacing,
+      addPlate,
+      plateThickness: addPlate ? plateThickness : undefined,
+      platePadding: addPlate ? platePadding : undefined,
+    }
+  };
+}

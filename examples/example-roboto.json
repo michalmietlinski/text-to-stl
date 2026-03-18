@@ -1,0 +1,11 @@
+{
+  "text": "Roboto",
+  "mode": "combined",
+  "letterHeight": 4,
+  "characterHeight": 25,
+  "spacing": 2,
+  "addPlate": true,
+  "plateThickness": 2,
+  "platePadding": 4,
+  "fontName": "Roboto-Regular"
+}

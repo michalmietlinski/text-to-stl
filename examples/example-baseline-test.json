@@ -1,0 +1,11 @@
+{
+  "text": "Typography",
+  "mode": "combined",
+  "letterHeight": 4,
+  "characterHeight": 25,
+  "spacing": 1,
+  "addPlate": true,
+  "plateThickness": 2,
+  "platePadding": 3,
+  "fontName": "OpenSans-Regular"
+}

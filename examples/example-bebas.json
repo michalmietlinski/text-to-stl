@@ -1,0 +1,11 @@
+{
+  "text": "BOLD",
+  "mode": "combined",
+  "letterHeight": 6,
+  "characterHeight": 35,
+  "spacing": 2,
+  "addPlate": true,
+  "plateThickness": 3,
+  "platePadding": 5,
+  "fontUrl": "https://github.com/google/fonts/raw/main/ofl/bebasneue/BebasNeue-Regular.ttf"
+}

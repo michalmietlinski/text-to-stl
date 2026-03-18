@@ -1,0 +1,11 @@
+{
+  "text": "HELLO",
+  "mode": "combined",
+  "letterHeight": 3,
+  "characterHeight": 20,
+  "spacing": 1,
+  "addPlate": true,
+  "plateThickness": 2,
+  "platePadding": 3,
+  "fontName": "Roboto-Bold"
+}

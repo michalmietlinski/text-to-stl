@@ -1,0 +1,21 @@
+{
+  "name": "font-to-stl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generate 3D STL files from text using any TTF/OTF font - create individual letters or combined text",
+  "type": "module",
+  "scripts": {
+    "generate": "node src/cli/index.js",
+    "build-web": "node tools/build_web.js",
+    "download-font": "node tools/download-font.js",
+    "download-fonts": "node tools/download-fonts.js",
+    "dev": "npm run build-web && echo Open http://localhost:3000/web/ in your browser && npx serve . -p 3000",
+    "dev-docs": "echo Open http://localhost:3000 in your browser && npx serve docs -p 3000"
+  },
+  "dependencies": {
+    "@jscad/modeling": "^2.13.0",
+    "@jscad/stl-serializer": "^2.1.23",
+    "earcut": "^3.0.2",
+    "opentype.js": "^1.3.4"
+  }
+}

@@ -1,0 +1,20 @@
+# Dependencies & build
+node_modules/
+
+# Generated output
+output/
+cache/
+docs/
+web/fonts/
+
+# OS & editor
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+.env
+.env.*
+
+# Misc
+FIX-HOLES-AND-DEPLOY.md
+nul
