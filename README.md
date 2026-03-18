@@ -136,7 +136,7 @@ Then open **http://localhost:3000/web/** in your browser (note the `/web/` at th
 npm run build-web
 ```
 
-This builds to the `docs/` folder. Deploy via GitHub Pages (Settings → Pages → Deploy from `docs/` folder).
+This builds to the `docs/` folder. Deploy via GitHub Pages (Settings → Pages → Deploy from `docs/` folder). Use the **project URL** (with repo name), e.g. **https://yourusername.github.io/text-to-stl/** — not the root `https://yourusername.github.io/`, or script imports will 404.
 
 **Test the built version:**
 
