@@ -1,0 +1,92 @@
+{
+  "fonts": [
+    {
+      "name": "FiraSans-Bold",
+      "url": "fonts/FiraSans-Bold.ttf"
+    },
+    {
+      "name": "FiraSans-Regular",
+      "url": "fonts/FiraSans-Regular.ttf"
+    },
+    {
+      "name": "Lato-Bold",
+      "url": "fonts/Lato-Bold.ttf"
+    },
+    {
+      "name": "Lato-Regular",
+      "url": "fonts/Lato-Regular.ttf"
+    },
+    {
+      "name": "LibreFranklin-Wght",
+      "url": "fonts/LibreFranklin-Wght.ttf"
+    },
+    {
+      "name": "Merriweather-Variable",
+      "url": "fonts/Merriweather-Variable.ttf"
+    },
+    {
+      "name": "Montserrat-Wght",
+      "url": "fonts/Montserrat-Wght.ttf"
+    },
+    {
+      "name": "Nunito-Wght",
+      "url": "fonts/Nunito-Wght.ttf"
+    },
+    {
+      "name": "OpenSans-Bold",
+      "url": "fonts/OpenSans-Bold.ttf"
+    },
+    {
+      "name": "OpenSans-Regular",
+      "url": "fonts/OpenSans-Regular.ttf"
+    },
+    {
+      "name": "Oswald-Wght",
+      "url": "fonts/Oswald-Wght.ttf"
+    },
+    {
+      "name": "PlayfairDisplay-Wght",
+      "url": "fonts/PlayfairDisplay-Wght.ttf"
+    },
+    {
+      "name": "Poppins-Bold",
+      "url": "fonts/Poppins-Bold.ttf"
+    },
+    {
+      "name": "Poppins-Regular",
+      "url": "fonts/Poppins-Regular.ttf"
+    },
+    {
+      "name": "Quicksand-Wght",
+      "url": "fonts/Quicksand-Wght.ttf"
+    },
+    {
+      "name": "Raleway-Wght",
+      "url": "fonts/Raleway-Wght.ttf"
+    },
+    {
+      "name": "Roboto-Bold",
+      "url": "fonts/Roboto-Bold.ttf"
+    },
+    {
+      "name": "Roboto-Regular",
+      "url": "fonts/Roboto-Regular.ttf"
+    },
+    {
+      "name": "SourceSans3-Wght",
+      "url": "fonts/SourceSans3-Wght.ttf"
+    },
+    {
+      "name": "Ubuntu-Bold",
+      "url": "fonts/Ubuntu-Bold.ttf"
+    },
+    {
+      "name": "Ubuntu-Regular",
+      "url": "fonts/Ubuntu-Regular.ttf"
+    },
+    {
+      "name": "WorkSans-Wght",
+      "url": "fonts/WorkSans-Wght.ttf"
+    }
+  ]
+}

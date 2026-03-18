@@ -4,7 +4,6 @@ node_modules/
 # Generated output
 output/
 cache/
-docs/
 web/fonts/
 
 # OS & editor
