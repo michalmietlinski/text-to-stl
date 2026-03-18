@@ -24,6 +24,16 @@ function toFiniteNumber(value, label) {
   return num;
 }
 
+function fnv1a32(str) {
+  // Deterministic sync hash for deduping STLs.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
 /**
  * Flatten opentype path commands to contours (array of [x,y] points per contour).
  * Handles M, L, C, Q, Z. resolution = samples per Bézier segment (higher = smoother curves).
@@ -756,6 +766,9 @@ export async function generateFontToSTL(params, options = {}) {
   // Mode: separate - return array of { char, stl }
   if (mode === "separate") {
     const results = [];
+    // Deduplicate: if the same glyph (case-insensitive) renders to the same STL,
+    // only keep one copy. This avoids multiple downloads when text repeats letters.
+    const seen = new Set();
     
     for (const letter of letters) {
       const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
@@ -780,6 +793,10 @@ export async function generateFontToSTL(params, options = {}) {
         Array.isArray(rawData) && rawData.length > 0 && typeof rawData[0] === "string" ? rawData[0] :
         Buffer.from(rawData).toString("utf8");
       
+      const charKey = String(letter.char).toLowerCase();
+      const dedupKey = `${charKey}|${fnv1a32(stl)}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
       results.push({ char: letter.char, stl });
     }
     

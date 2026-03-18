@@ -29,6 +29,17 @@ function stlToString(rawData) {
   return String(rawData);
 }
 
+function fnv1a32(str) {
+  // Deterministic sync hash for deduping STLs.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  // Convert to uint32 hex
+  return (h >>> 0).toString(16);
+}
+
 // Helper functions (flattenPath, contoursBounds, fitContours, etc.)
 function flattenPath(path, resolution = DEFAULT_RESOLUTION) {
   const samples = Math.max(2, Math.min(128, Math.round(resolution)));
@@ -271,6 +282,9 @@ export async function generateFontToSTL(params, options = {}) {
 
   if (mode === "separate") {
     const results = [];
+    // Deduplicate: if the same glyph (case-insensitive) renders to the same STL,
+    // only keep one copy. This avoids multiple downloads when text repeats letters.
+    const seen = new Set();
     for (const letter of letters) {
       const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
       if (!geom) continue;
@@ -287,6 +301,10 @@ export async function generateFontToSTL(params, options = {}) {
       }
       const rawData = serialize({ binary: false }, finalGeom);
       const stl = stlToString(rawData);
+      const charKey = String(letter.char).toLowerCase();
+      const dedupKey = `${charKey}|${fnv1a32(stl)}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
       results.push({ char: letter.char, stl });
     }
     return { mode: "separate", letters: results };

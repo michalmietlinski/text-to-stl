@@ -1,4 +1,5 @@
 import { generateFontToSTL } from '../src/core/textPlate.web.js';
+import JSZip from 'jszip';
 
 const DEFAULT_FONTS = [
   { name: 'OpenSans-Bold', url: 'fonts/OpenSans-Bold.ttf' },
@@ -42,6 +43,30 @@ function populateFontSelect(selectEl, fonts) {
 
 function downloadSTL(filename, content) {
   const blob = new Blob([content], { type: 'model/stl' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Sanitize for use in filenames (STL and ZIP). */
+function safeFileName(char) {
+  return String(char).replace(/[<>:"/\\|?*\s]/g, '_') || 'letter';
+}
+
+/** Build unique STL filename per letter (e.g. H.stl, L_2.stl for duplicate L). */
+function letterStlName(char, countByChar) {
+  const base = safeFileName(char);
+  const n = countByChar.get(char) ?? 0;
+  countByChar.set(char, n + 1);
+  return n === 0 ? `${base}.stl` : `${base}_${n + 1}.stl`;
+}
+
+function downloadZip(filename, blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -161,12 +186,18 @@ document.getElementById('generator-form').addEventListener('submit', async (e) =
     const result = await generateFontToSTL(params);
     
     if (result.mode === 'separate') {
-      // Download multiple files
-      for (const letter of result.letters) {
-        const filename = `${letter.char}.stl`;
-        downloadSTL(filename, letter.stl);
+      // Pack all letter STLs into one ZIP and download
+      const zip = new JSZip();
+      const countByChar = new Map();
+      for (let i = 0; i < result.letters.length; i++) {
+        const letter = result.letters[i];
+        const name = letterStlName(letter.char, countByChar);
+        zip.file(name, letter.stl, { binary: true });
       }
-      setStatus(`✅ Downloaded ${result.letters.length} letter files successfully!`);
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const zipName = (text.replace(/\s+/g, '_') || 'letters').replace(/[<>:"/\\|?*]/g, '_') + '_letters.zip';
+      downloadZip(zipName, zipBlob);
+      setStatus(`✅ Downloaded ${zipName} (${result.letters.length} letter STLs)`);
     } else {
       // Download single file
       const filename = `${text.replace(/\s+/g, '_')}.stl`;
