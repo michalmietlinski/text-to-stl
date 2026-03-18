@@ -33,8 +33,11 @@ async function copyDirRecursive(fromDir, toDir) {
 async function main() {
   // Copy web assets
   await copyFileRelative("web/index.html", "docs");
-  await copyFileRelative("web/main.js", "docs");
-  
+  // Copy main.js and fix import path: in docs/, main.js and src/ are siblings (no ../)
+  let mainJs = await fs.readFile(path.join(projectRoot, "web", "main.js"), "utf8");
+  mainJs = mainJs.replace(/from\s+['"]\.\.\/src\//g, "from 'src/");
+  await fs.writeFile(path.join(projectRoot, "docs", "main.js"), mainJs);
+
   // Copy src directory for imports to work
   await copyDirRecursive("src", "docs/src");
   console.log("Source files copied to docs/src/");

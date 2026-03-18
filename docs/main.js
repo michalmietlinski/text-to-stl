@@ -1,4 +1,4 @@
-import { generateFontToSTL } from '../src/core/textPlate.web.js';
+import { generateFontToSTL } from 'src/core/textPlate.web.js';
 import JSZip from 'jszip';
 
 const DEFAULT_FONTS = [
