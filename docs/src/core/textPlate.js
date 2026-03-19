@@ -609,10 +609,16 @@ export function getLetterContours(font, text, characterHeightMm, resolution = DE
   const letters = [];
   const unitsPerEm = font.unitsPerEm || 1000;
   const scale = characterHeightMm / unitsPerEm;
+  let lineIndex = 0;
   
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    if (char === ' ' || char === '\n' || char === '\r') continue;
+    if (char === '\r') continue;
+    if (char === '\n') {
+      lineIndex += 1;
+      continue;
+    }
+    if (char === ' ') continue;
     
     const glyph = font.charToGlyph(char);
     if (!glyph || !glyph.path) continue;
@@ -634,7 +640,8 @@ export function getLetterContours(font, text, characterHeightMm, resolution = DE
       char,
       contours: scaledContours,
       bounds,
-      advanceWidth
+      advanceWidth,
+      lineIndex,
     });
   }
   
@@ -737,6 +744,7 @@ export async function generateFontToSTL(params, options = {}) {
   const letterHeight = toFiniteNumber(params.letterHeight ?? 5, "letterHeight");
   const characterHeight = toFiniteNumber(params.characterHeight ?? 20, "characterHeight");
   const spacing = toFiniteNumber(params.spacing ?? 0, "spacing");
+  const lineSpacing = toFiniteNumber(params.lineSpacing ?? Math.max(1, characterHeight * 0.3), "lineSpacing");
   const addPlate = params.addPlate === true;
   const plateThickness = addPlate ? toFiniteNumber(params.plateThickness ?? 2, "plateThickness") : 0;
   const platePadding = addPlate ? toFiniteNumber(params.platePadding ?? 2, "platePadding") : 0;
@@ -803,33 +811,35 @@ export async function generateFontToSTL(params, options = {}) {
     return { mode: "separate", letters: results };
   }
   
-  // Mode: combined - arrange letters horizontally with shared baseline
-  // Font glyphs already have baseline at y=0, just need to position horizontally
+  // Mode: combined - arrange letters by lines.
+  // Newlines in input text create line breaks.
   const geometries = [];
-  let xOffset = 0;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  
-  for (const letter of letters) {
-    const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
-    if (!geom) continue;
-    
-    // Position letter horizontally only - baseline is already at y=0
-    // Just shift left edge to xOffset
-    const translated = translate([xOffset - letter.bounds.minX, 0, 0], geom);
-    geometries.push(translated);
-    
-    // Track bounds for plate
-    const letterMinX = xOffset;
-    const letterMaxX = xOffset + letter.bounds.width;
-    const letterMinY = letter.bounds.minY; // Ascenders (negative, going up)
-    const letterMaxY = letter.bounds.maxY; // Descenders (positive, going down) or baseline (0)
-    
-    if (letterMinX < minX) minX = letterMinX;
-    if (letterMaxX > maxX) maxX = letterMaxX;
-    if (letterMinY < minY) minY = letterMinY;
-    if (letterMaxY > maxY) maxY = letterMaxY;
-    
-    xOffset += letter.advanceWidth + spacing;
+
+  const totalLines = Math.max(1, String(text).split(/\r?\n/).length);
+  for (let li = 0; li < totalLines; li++) {
+    const lineLetters = letters.filter((l) => (l.lineIndex || 0) === li);
+    let xOffset = 0;
+    const yOffset = -li * (characterHeight + lineSpacing);
+    for (const letter of lineLetters) {
+      const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
+      if (!geom) continue;
+
+      const translated = translate([xOffset - letter.bounds.minX, yOffset, 0], geom);
+      geometries.push(translated);
+
+      const letterMinX = xOffset;
+      const letterMaxX = xOffset + letter.bounds.width;
+      const letterMinY = letter.bounds.minY + yOffset;
+      const letterMaxY = letter.bounds.maxY + yOffset;
+
+      if (letterMinX < minX) minX = letterMinX;
+      if (letterMaxX > maxX) maxX = letterMaxX;
+      if (letterMinY < minY) minY = letterMinY;
+      if (letterMaxY > maxY) maxY = letterMaxY;
+
+      xOffset += letter.advanceWidth + spacing;
+    }
   }
   
   if (geometries.length === 0) {
@@ -875,6 +885,7 @@ export async function generateFontToSTL(params, options = {}) {
       letterHeight,
       characterHeight,
       spacing,
+      lineSpacing,
       addPlate,
       plateThickness: addPlate ? plateThickness : undefined,
       platePadding: addPlate ? platePadding : undefined,

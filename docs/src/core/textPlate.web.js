@@ -254,6 +254,7 @@ export async function generateFontToSTL(params, options = {}) {
   const letterHeight = toFiniteNumber(params.letterHeight ?? 5, "letterHeight");
   const characterHeight = toFiniteNumber(params.characterHeight ?? 20, "characterHeight");
   const spacing = toFiniteNumber(params.spacing ?? 0, "spacing");
+  const lineSpacing = toFiniteNumber(params.lineSpacing ?? Math.max(1, characterHeight * 0.3), "lineSpacing");
   const addPlate = params.addPlate === true;
   const plateThickness = addPlate ? toFiniteNumber(params.plateThickness ?? 2, "plateThickness") : 0;
   const platePadding = addPlate ? toFiniteNumber(params.platePadding ?? 2, "platePadding") : 0;
@@ -311,22 +312,27 @@ export async function generateFontToSTL(params, options = {}) {
   }
 
   const geometries = [];
-  let xOffset = 0;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const letter of letters) {
-    const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
-    if (!geom) continue;
-    const translated = translate([xOffset - letter.bounds.minX, 0, 0], geom);
-    geometries.push(translated);
-    const letterMinX = xOffset;
-    const letterMaxX = xOffset + letter.bounds.width;
-    const letterMinY = letter.bounds.minY;
-    const letterMaxY = letter.bounds.maxY;
-    if (letterMinX < minX) minX = letterMinX;
-    if (letterMaxX > maxX) maxX = letterMaxX;
-    if (letterMinY < minY) minY = letterMinY;
-    if (letterMaxY > maxY) maxY = letterMaxY;
-    xOffset += letter.advanceWidth + spacing;
+  const totalLines = Math.max(1, String(text).split(/\r?\n/).length);
+  for (let li = 0; li < totalLines; li++) {
+    const lineLetters = letters.filter((l) => (l.lineIndex || 0) === li);
+    let xOffset = 0;
+    const yOffset = -li * (characterHeight + lineSpacing);
+    for (const letter of lineLetters) {
+      const geom = extrudeLetterContours(letter.contours, letterHeight, options.debug);
+      if (!geom) continue;
+      const translated = translate([xOffset - letter.bounds.minX, yOffset, 0], geom);
+      geometries.push(translated);
+      const letterMinX = xOffset;
+      const letterMaxX = xOffset + letter.bounds.width;
+      const letterMinY = letter.bounds.minY + yOffset;
+      const letterMaxY = letter.bounds.maxY + yOffset;
+      if (letterMinX < minX) minX = letterMinX;
+      if (letterMaxX > maxX) maxX = letterMaxX;
+      if (letterMinY < minY) minY = letterMinY;
+      if (letterMaxY > maxY) maxY = letterMaxY;
+      xOffset += letter.advanceWidth + spacing;
+    }
   }
   if (geometries.length === 0) {
     throw new Error("No geometry generated from text");
@@ -360,6 +366,7 @@ export async function generateFontToSTL(params, options = {}) {
       letterHeight,
       characterHeight,
       spacing,
+      lineSpacing,
       addPlate,
       plateThickness: addPlate ? plateThickness : undefined,
       platePadding: addPlate ? platePadding : undefined,
@@ -375,10 +382,16 @@ function getLetterContours(font, text, characterHeight, resolution) {
   const letters = [];
   const unitsPerEm = font.unitsPerEm || 1000;
   const scale = characterHeight / unitsPerEm;
+  let lineIndex = 0;
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    if (char === " " || char === "\n" || char === "\r") continue;
+    if (char === "\r") continue;
+    if (char === "\n") {
+      lineIndex += 1;
+      continue;
+    }
+    if (char === " ") continue;
 
     const glyph = font.charToGlyph(char);
     if (!glyph || !glyph.path) continue;
@@ -400,6 +413,7 @@ function getLetterContours(font, text, characterHeight, resolution) {
       contours: scaledContours,
       bounds,
       advanceWidth,
+      lineIndex,
     });
   }
 
