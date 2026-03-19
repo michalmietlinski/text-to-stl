@@ -8,7 +8,7 @@
     <style>
       :root {
         color-scheme: light dark;
-        --page-max-width: 900px;
+        --page-max-width: 1200px;
         --card-bg-light: rgba(255, 255, 255, 0.85);
         --card-bg-dark: rgba(15, 23, 42, 0.9);
         --card-border-light: rgba(148, 163, 184, 0.6);
@@ -37,9 +37,13 @@
       @media (prefers-color-scheme: dark) { body { color: #e5e7eb; } }
       .page { width: 100%; max-width: var(--page-max-width); }
       header { margin-bottom: 20px; text-align: center; }
-      h1 { margin: 0 0 8px; font-size: clamp(1.9rem, 2.4vw, 2.5rem); letter-spacing: -0.03em; }
+      h1 { margin: 0 0 8px; font-size: clamp(1.9rem, 2.4vw, 2.5rem); letter-spacing: -0.03em; color: #ffffff; }
       .subheading { margin: 0; font-size: 0.95rem; color: var(--muted-text); }
       main.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+      .side-column { display: grid; gap: 16px; }
+      @media (min-width: 980px) {
+        main.layout { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: start; }
+      }
       .card {
         padding: 20px 22px;
         border-radius: 16px;
@@ -109,6 +113,10 @@
       .font-upload-clear { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--input-border); background: var(--input-bg-light); color: inherit; font-size: 0.85rem; cursor: pointer; }
       .font-upload-clear:hover { border-color: var(--accent); }
       @media (prefers-color-scheme: dark) { .font-upload-clear { background: var(--input-bg-dark); } }
+      .info-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.9rem; }
+      .project-list { margin: 0; padding-left: 18px; display: grid; gap: 7px; font-size: 0.9rem; }
+      .project-list a { text-decoration: none; }
+      .project-note { color: var(--muted-text); font-size: 0.82rem; margin-left: 6px; }
       footer { margin-top: 20px; text-align: center; font-size: 0.82rem; color: var(--muted-text); }
       footer a { color: #2563eb; text-decoration: none; }
       @media (prefers-color-scheme: dark) { footer a { color: #60a5fa; } }
@@ -117,8 +125,8 @@
   <body>
     <div class="page">
       <header>
-        <h1>✨ Font to STL</h1>
-        <p class="subheading">Generate 3D printable text from any font - create individual letters or combined text</p>
+        <h1>Font to STL</h1>
+        <p class="subheading">Generate printable text STLs from any font. Create combined text or deduplicated separate letters (ZIP download).</p>
       </header>
       <main class="layout">
         <section class="card">
@@ -201,6 +209,29 @@
             </div>
           </form>
         </section>
+        <div class="side-column">
+          <section class="card">
+            <h2 class="card-title">Printing Tips</h2>
+            <ul class="info-list">
+              <li>Letters are generated flat for easy FDM printing without supports.</li>
+              <li>For small details, use lower layer height (0.12-0.2 mm).</li>
+              <li>Enable plate mode for easier bed adhesion and cleaner handling.</li>
+            </ul>
+          </section>
+          <section class="card">
+            <h2 class="card-title">More Tools &amp; Projects</h2>
+            <p class="card-description">Other STL generators from Michal Mietlinski (CLI and/or web, depending on project).</p>
+            <ul class="project-list">
+              <li><a href="https://michalmietlinski.github.io/washer_generator/" target="_blank">Washer STL Generator (web)</a><span class="project-note"> - repo: <a href="https://github.com/michalmietlinski/washer_generator" target="_blank">washer_generator</a></span></li>
+              <li><a href="https://github.com/michalmietlinski/battery-holder-generator" target="_blank">Battery Holder Generator</a></li>
+              <li><a href="https://github.com/michalmietlinski/box-drawer-divider-generator" target="_blank">Box Drawer Divider Generator</a></li>
+              <li><a href="https://github.com/michalmietlinski/hole-generator" target="_blank">Hole Generator</a></li>
+              <li><a href="https://github.com/michalmietlinski/braille-label-generator" target="_blank">Braille Label Generator</a></li>
+              <li><a href="https://github.com/michalmietlinski/adapter-generator" target="_blank">Adapter Generator</a></li>
+              <li><a href="https://github.com/michalmietlinski/plant-cover-generator" target="_blank">Plant Cover Generator</a></li>
+            </ul>
+          </section>
+        </div>
       </main>
       <footer>
         <p>Built with ❤️ using <a href="https://github.com/jscad/OpenJSCAD.org" target="_blank">JSCAD</a> • Font rendering via <a href="https://opentype.js.org/" target="_blank">opentype.js</a></p>
