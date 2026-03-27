@@ -1,12 +1,36 @@
 {
   "fonts": [
     {
+      "name": "Anton-Regular",
+      "url": "fonts/Anton-Regular.ttf"
+    },
+    {
+      "name": "Barlow-Regular",
+      "url": "fonts/Barlow-Regular.ttf"
+    },
+    {
+      "name": "BebasNeue-Regular",
+      "url": "fonts/BebasNeue-Regular.ttf"
+    },
+    {
       "name": "FiraSans-Bold",
       "url": "fonts/FiraSans-Bold.ttf"
     },
     {
       "name": "FiraSans-Regular",
       "url": "fonts/FiraSans-Regular.ttf"
+    },
+    {
+      "name": "Inconsolata-Regular",
+      "url": "fonts/Inconsolata-Regular.ttf"
+    },
+    {
+      "name": "Inter-Variable",
+      "url": "fonts/Inter-Variable.ttf"
+    },
+    {
+      "name": "Karla-Wght",
+      "url": "fonts/Karla-Wght.ttf"
     },
     {
       "name": "Lato-Bold",
@@ -21,12 +45,20 @@
       "url": "fonts/LibreFranklin-Wght.ttf"
     },
     {
+      "name": "Manrope-Wght",
+      "url": "fonts/Manrope-Wght.ttf"
+    },
+    {
       "name": "Merriweather-Variable",
       "url": "fonts/Merriweather-Variable.ttf"
     },
     {
       "name": "Montserrat-Wght",
       "url": "fonts/Montserrat-Wght.ttf"
+    },
+    {
+      "name": "Mulish-Wght",
+      "url": "fonts/Mulish-Wght.ttf"
     },
     {
       "name": "Nunito-Wght",

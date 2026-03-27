@@ -58,11 +58,34 @@ function safeFileName(char) {
   return String(char).replace(/[<>:"/\\|?*\s]/g, '_') || 'letter';
 }
 
-/** Build unique STL filename per letter (e.g. H.stl, L_2.stl for duplicate L). */
-function letterStlName(char, countByChar) {
-  const base = safeFileName(char);
-  const n = countByChar.get(char) ?? 0;
-  countByChar.set(char, n + 1);
+function selectedFontName() {
+  if (fontUploadInput?.files?.[0]?.name) {
+    return fontUploadInput.files[0].name.replace(/\.[^.]+$/, '');
+  }
+  const option = fontSelect?.selectedOptions?.[0];
+  if (option?.textContent) return option.textContent;
+  const value = fontSelect?.value || '';
+  const tail = String(value).split('/').pop()?.split('?')[0] || '';
+  return tail.replace(/\.[^.]+$/, '') || 'font';
+}
+
+function buildCombinedStlName(text, fontName) {
+  const textPart = safeFileName(text || 'text');
+  const fontPart = safeFileName(fontName || 'font');
+  return `${textPart}_${fontPart}_combined.stl`;
+}
+
+function buildZipName(text, fontName) {
+  const textPart = safeFileName(text || 'letters');
+  const fontPart = safeFileName(fontName || 'font');
+  return `${textPart}_${fontPart}_separate.zip`;
+}
+
+/** Build unique STL filename per letter (e.g. H_OpenSans-Bold.stl, L_OpenSans-Bold_2.stl). */
+function letterStlName(char, fontName, countByChar) {
+  const base = `${safeFileName(char)}_${safeFileName(fontName || 'font')}`;
+  const n = countByChar.get(base) ?? 0;
+  countByChar.set(base, n + 1);
   return n === 0 ? `${base}.stl` : `${base}_${n + 1}.stl`;
 }
 
@@ -184,6 +207,7 @@ document.getElementById('generator-form').addEventListener('submit', async (e) =
     };
     
     const result = await generateFontToSTL(params);
+    const fontName = selectedFontName();
     
     if (result.mode === 'separate') {
       // Pack all letter STLs into one ZIP and download
@@ -191,16 +215,16 @@ document.getElementById('generator-form').addEventListener('submit', async (e) =
       const countByChar = new Map();
       for (let i = 0; i < result.letters.length; i++) {
         const letter = result.letters[i];
-        const name = letterStlName(letter.char, countByChar);
+        const name = letterStlName(letter.char, fontName, countByChar);
         zip.file(name, letter.stl, { binary: true });
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const zipName = (text.replace(/\s+/g, '_') || 'letters').replace(/[<>:"/\\|?*]/g, '_') + '_letters.zip';
+      const zipName = buildZipName(text, fontName);
       downloadZip(zipName, zipBlob);
       setStatus(`✅ Downloaded ${zipName} (${result.letters.length} letter STLs)`);
     } else {
       // Download single file
-      const filename = `${text.replace(/\s+/g, '_')}.stl`;
+      const filename = buildCombinedStlName(text, fontName);
       downloadSTL(filename, result.stl);
       setStatus(`✅ Downloaded ${filename} successfully!`);
     }

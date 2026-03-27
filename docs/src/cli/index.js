@@ -203,6 +203,43 @@ function parseArgs(argv) {
   return args;
 }
 
+function sanitizeFilePart(value, fallback = "output") {
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+}
+
+function extractFontName(params) {
+  if (params.fontName) return String(params.fontName);
+  if (params.fontPath) return path.parse(String(params.fontPath)).name;
+  if (params.fontUrl) {
+    const tail = String(params.fontUrl).split("/").pop()?.split("?")[0] || "";
+    return path.parse(tail).name;
+  }
+  return "font";
+}
+
+function buildCombinedDefaultName(params, resultMeta) {
+  const textPart = sanitizeFilePart(resultMeta?.text || params.text || "text");
+  const fontPart = sanitizeFilePart(extractFontName(params), "font");
+  const modePart = sanitizeFilePart(params.mode || "combined");
+  return `${textPart}_${fontPart}_${modePart}.stl`;
+}
+
+function buildSeparateLetterName(letterChar, params, usedNames) {
+  const charPart = sanitizeFilePart(letterChar, "letter");
+  const fontPart = sanitizeFilePart(extractFontName(params), "font");
+  const base = `${charPart}_${fontPart}`;
+  const seen = usedNames.get(base) ?? 0;
+  usedNames.set(base, seen + 1);
+  const uniqueSuffix = seen === 0 ? "" : `_${seen + 1}`;
+  return `${base}${uniqueSuffix}.stl`;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -252,10 +289,10 @@ async function main() {
       // Separate letters - save each to its own file
       const outputDir = args.output || "output";
       await fs.mkdir(outputDir, { recursive: true });
+      const usedNames = new Map();
       
       for (const letter of result.letters) {
-        // Sanitize filename (replace special chars)
-        const filename = letter.char.replace(/[<>:"/\\|?*]/g, '_') + '.stl';
+        const filename = buildSeparateLetterName(letter.char, params, usedNames);
         const filepath = path.join(outputDir, filename);
         await fs.writeFile(filepath, letter.stl, "utf8");
         console.log(`Generated: ${filepath}`);
@@ -264,7 +301,7 @@ async function main() {
       console.log(`\nTotal: ${result.letters.length} letter files in ${outputDir}`);
     } else {
       // Combined mode - single file
-      const outputPath = args.output || path.join("output", "text.stl");
+      const outputPath = args.output || path.join("output", buildCombinedDefaultName(params, result.meta));
       await fs.mkdir(path.dirname(outputPath), { recursive: true });
       await fs.writeFile(outputPath, result.stl, "utf8");
       console.log("Output generated successfully.");

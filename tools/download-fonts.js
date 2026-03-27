@@ -40,6 +40,15 @@ const FONT_ENTRIES = [
   [`${GITHUB_BASE}/ofl/librefranklin/LibreFranklin%5Bwght%5D.ttf`, "LibreFranklin-Wght.ttf"],
   [`${GITHUB_BASE}/ofl/quicksand/Quicksand%5Bwght%5D.ttf`, "Quicksand-Wght.ttf"],
   [`${GITHUB_BASE}/ofl/merriweather/Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf`, "Merriweather-Variable.ttf"],
+  // Additional families
+  [`${GITHUB_BASE}/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf`, "Inter-Variable.ttf"],
+  [`${GITHUB_BASE}/ofl/manrope/Manrope%5Bwght%5D.ttf`, "Manrope-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/mulish/Mulish%5Bwght%5D.ttf`, "Mulish-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/inconsolata/static/Inconsolata-Regular.ttf`, "Inconsolata-Regular.ttf"],
+  [`${GITHUB_BASE}/ofl/karla/Karla%5Bwght%5D.ttf`, "Karla-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/bebasneue/BebasNeue-Regular.ttf`, "BebasNeue-Regular.ttf"],
+  [`${GITHUB_BASE}/ofl/anton/Anton-Regular.ttf`, "Anton-Regular.ttf"],
+  [`${GITHUB_BASE}/ofl/barlow/Barlow-Regular.ttf`, "Barlow-Regular.ttf"],
 ];
 
 async function download(url) {
