@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "generate": "node src/cli/index.js",
+    "generate-base-set": "node src/cli/index.js --generate-base-set",
+    "generate-full-set": "node src/cli/index.js --generate-full-set",
+    "generate-both-sets": "node src/cli/index.js --generate-both-sets",
     "build-web": "node tools/build_web.js",
     "download-font": "node tools/download-font.js",
     "download-fonts": "node tools/download-fonts.js",

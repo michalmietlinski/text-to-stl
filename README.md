@@ -45,6 +45,14 @@ This creates `output/text.stl` with all letters arranged horizontally.
 npm run generate -- --input examples/example-combined.json
 ```
 
+**Generate full multilingual set for all fonts (separate files):**
+
+```bash
+npm run generate-full-set -- --output output/alphabet-all-fonts
+```
+
+This creates one directory per font (for example `output/alphabet-all-fonts/OpenSans-Bold/`) and exports separate STL files for `a-z`, `A-Z`, `0-9`, Polish/German letters, and additional Latin special characters.
+
 ### Built-in Fonts
 
 Four professional fonts are included - use `fontName` parameter:

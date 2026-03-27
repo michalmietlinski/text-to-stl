@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 import { generate, generateFontToSTL } from "../core/textPlate.js";
 
 const FONT_EXTS = [".ttf", ".otf", ".ttc"];
+const DEFAULT_FULL_SET_OUTPUT_DIR = path.join("output", "alphabet-all-fonts");
+const DEFAULT_FULL_SET_LETTER_HEIGHT = 3;
+const DEFAULT_FULL_SET_CHARACTER_HEIGHT = 50;
+const DEFAULT_BASE_SET_SUBDIR = "base";
+const DEFAULT_FULL_SET_SUBDIR = "full";
 
 function getProjectRoot() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +152,11 @@ Required:
 
 Optional:
   --output <path>    Output STL path or directory (default: output/)
+  --generate-base-set  Generate base character set [a-z,A-Z,0-9] for all fonts
+  --generate-full-set  Generate full multilingual character set for all fonts
+  --generate-both-sets  Generate both base and full sets for all fonts
+  --characterHeight <mm>  Character height for set generation (default: 50)
+  --letterHeight <mm>     Letter extrusion for set generation (default: 3)
   --debug            Log detailed information to stderr
   --help             Show help
 
@@ -193,6 +203,18 @@ function parseArgs(argv) {
       args.debug = true;
       continue;
     }
+    if (key === "generate-full-set") {
+      args.generateFullSet = true;
+      continue;
+    }
+    if (key === "generate-base-set") {
+      args.generateBaseSet = true;
+      continue;
+    }
+    if (key === "generate-both-sets") {
+      args.generateBothSets = true;
+      continue;
+    }
     const value = argv[i + 1];
     if (value == null || value.startsWith("--")) {
       throw new Error(`Missing value for --${key}`);
@@ -233,17 +255,142 @@ function buildCombinedDefaultName(params, resultMeta) {
 function buildSeparateLetterName(letterChar, params, usedNames) {
   const charPart = sanitizeFilePart(letterChar, "letter");
   const fontPart = sanitizeFilePart(extractFontName(params), "font");
-  const base = `${charPart}_${fontPart}`;
+  const codePart = Array.from(String(letterChar))
+    .map((ch) => ch.codePointAt(0).toString(16).toUpperCase())
+    .join("-");
+  const base = `${charPart}_U${codePart}_${fontPart}`;
   const seen = usedNames.get(base) ?? 0;
   usedNames.set(base, seen + 1);
   const uniqueSuffix = seen === 0 ? "" : `_${seen + 1}`;
   return `${base}${uniqueSuffix}.stl`;
 }
 
+function buildFullAlphabetSetText() {
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const digits = "0123456789";
+  const polish = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ";
+  const german = "äöüßÄÖÜ";
+  const extraLatin = "áàâãåæçéèêëíìîïñóòôõøúùûýÿÁÀÂÃÅÆÇÉÈÊËÍÌÎÏÑÓÒÔÕØÚÙÛÝČčĎďĚěŇňŘřŠšŤťŮůŽž";
+
+  const ordered = `${lowercase}${uppercase}${digits}${polish}${german}${extraLatin}`;
+  const seen = new Set();
+  let unique = "";
+  for (const ch of ordered) {
+    if (seen.has(ch)) continue;
+    seen.add(ch);
+    unique += ch;
+  }
+  return unique;
+}
+
+function buildBaseAlphabetSetText() {
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const digits = "0123456789";
+  return `${lowercase}${uppercase}${digits}`;
+}
+
+async function generateSetForAllFonts(args, options) {
+  const fonts = await listAvailableFonts();
+  if (fonts.length === 0) {
+    throw new Error("No fonts available. Put TTF/OTF files into `fonts/` first.");
+  }
+
+  const text = options.text;
+  const outputRoot = args.output || DEFAULT_FULL_SET_OUTPUT_DIR;
+  const letterHeight = Number(args.letterHeight ?? DEFAULT_FULL_SET_LETTER_HEIGHT);
+  const characterHeight = Number(args.characterHeight ?? DEFAULT_FULL_SET_CHARACTER_HEIGHT);
+  if (!Number.isFinite(letterHeight) || letterHeight <= 0) {
+    throw new Error("--letterHeight must be a positive number");
+  }
+  if (!Number.isFinite(characterHeight) || characterHeight <= 0) {
+    throw new Error("--characterHeight must be a positive number");
+  }
+
+  await fs.mkdir(outputRoot, { recursive: true });
+  console.log(`Generating ${options.label} for ${fonts.length} fonts...`);
+  console.log(`Charset size: ${Array.from(text).length} characters`);
+  console.log(`Output root: ${outputRoot}\n`);
+
+  let successCount = 0;
+  let failCount = 0;
+  for (const font of fonts) {
+    const outputDir = options.subDir
+      ? path.join(outputRoot, sanitizeFilePart(font.name, "font"), options.subDir)
+      : path.join(outputRoot, sanitizeFilePart(font.name, "font"));
+    await fs.mkdir(outputDir, { recursive: true });
+    const params = {
+      text,
+      mode: "separate",
+      letterHeight,
+      characterHeight,
+      fontName: font.name,
+      fontPath: path.join(getFontsDir(), font.file),
+    };
+
+    try {
+      const result = await generateFontToSTL(params, { debug: args.debug });
+      const usedNames = new Map();
+      for (const letter of result.letters) {
+        const filename = buildSeparateLetterName(letter.char, params, usedNames);
+        await fs.writeFile(path.join(outputDir, filename), letter.stl, "utf8");
+      }
+      successCount += 1;
+      console.log(`- ${font.name}: ${result.letters.length} files`);
+    } catch (error) {
+      failCount += 1;
+      console.error(`- ${font.name}: FAILED (${error.message})`);
+    }
+  }
+
+  console.log(`\nDone. ${options.label} generation complete. Success: ${successCount}, failed: ${failCount}.`);
+}
+
+async function generateFullSetForAllFonts(args) {
+  return generateSetForAllFonts(args, {
+    text: buildFullAlphabetSetText(),
+    label: "full character set",
+  });
+}
+
+async function generateBaseSetForAllFonts(args) {
+  return generateSetForAllFonts(args, {
+    text: buildBaseAlphabetSetText(),
+    label: "base alphabet set",
+  });
+}
+
+async function generateBothSetsForAllFonts(args) {
+  await generateSetForAllFonts(args, {
+    text: buildBaseAlphabetSetText(),
+    subDir: DEFAULT_BASE_SET_SUBDIR,
+    label: "base alphabet set",
+  });
+  await generateSetForAllFonts(args, {
+    text: buildFullAlphabetSetText(),
+    subDir: DEFAULT_FULL_SET_SUBDIR,
+    label: "full character set",
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     await printHelp();
+    return;
+  }
+
+  if (args.generateFullSet) {
+    await generateFullSetForAllFonts(args);
+    return;
+  }
+  if (args.generateBaseSet) {
+    await generateBaseSetForAllFonts(args);
+    return;
+  }
+  if (args.generateBothSets) {
+    await generateBothSetsForAllFonts(args);
     return;
   }
 
