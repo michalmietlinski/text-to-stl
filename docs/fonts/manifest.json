@@ -9,8 +9,20 @@
       "url": "fonts/Barlow-Regular.ttf"
     },
     {
+      "name": "BarlowCondensed-Regular",
+      "url": "fonts/BarlowCondensed-Regular.ttf"
+    },
+    {
       "name": "BebasNeue-Regular",
       "url": "fonts/BebasNeue-Regular.ttf"
+    },
+    {
+      "name": "Comfortaa-Wght",
+      "url": "fonts/Comfortaa-Wght.ttf"
+    },
+    {
+      "name": "Exo2-Wght",
+      "url": "fonts/Exo2-Wght.ttf"
     },
     {
       "name": "FiraSans-Bold",
@@ -27,6 +39,10 @@
     {
       "name": "Inter-Variable",
       "url": "fonts/Inter-Variable.ttf"
+    },
+    {
+      "name": "JosefinSans-Wght",
+      "url": "fonts/JosefinSans-Wght.ttf"
     },
     {
       "name": "Karla-Wght",
@@ -59,6 +75,14 @@
     {
       "name": "Mulish-Wght",
       "url": "fonts/Mulish-Wght.ttf"
+    },
+    {
+      "name": "NotoSans-Variable",
+      "url": "fonts/NotoSans-Variable.ttf"
+    },
+    {
+      "name": "NotoSerif-Variable",
+      "url": "fonts/NotoSerif-Variable.ttf"
     },
     {
       "name": "Nunito-Wght",
@@ -103,6 +127,10 @@
     {
       "name": "Roboto-Regular",
       "url": "fonts/Roboto-Regular.ttf"
+    },
+    {
+      "name": "Rubik-Wght",
+      "url": "fonts/Rubik-Wght.ttf"
     },
     {
       "name": "SourceSans3-Wght",

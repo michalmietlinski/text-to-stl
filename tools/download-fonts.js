@@ -49,6 +49,13 @@ const FONT_ENTRIES = [
   [`${GITHUB_BASE}/ofl/bebasneue/BebasNeue-Regular.ttf`, "BebasNeue-Regular.ttf"],
   [`${GITHUB_BASE}/ofl/anton/Anton-Regular.ttf`, "Anton-Regular.ttf"],
   [`${GITHUB_BASE}/ofl/barlow/Barlow-Regular.ttf`, "Barlow-Regular.ttf"],
+  [`${GITHUB_BASE}/ofl/barlowcondensed/BarlowCondensed-Regular.ttf`, "BarlowCondensed-Regular.ttf"],
+  [`${GITHUB_BASE}/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf`, "NotoSans-Variable.ttf"],
+  [`${GITHUB_BASE}/ofl/notoserif/NotoSerif%5Bwdth%2Cwght%5D.ttf`, "NotoSerif-Variable.ttf"],
+  [`${GITHUB_BASE}/ofl/josefinsans/JosefinSans%5Bwght%5D.ttf`, "JosefinSans-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/rubik/Rubik%5Bwght%5D.ttf`, "Rubik-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/comfortaa/Comfortaa%5Bwght%5D.ttf`, "Comfortaa-Wght.ttf"],
+  [`${GITHUB_BASE}/ofl/exo2/Exo2%5Bwght%5D.ttf`, "Exo2-Wght.ttf"],
 ];
 
 async function download(url) {
